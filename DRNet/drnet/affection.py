@@ -39,6 +39,40 @@ class Module(nn.Module):
         user_idx: (B,)
         item_idx: (B,)
         """
+        return self.score(user_idx, item_idx)
+
+    def predict(
+        self, 
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
+        """
+        user_idx: (B,)
+        item_idx: (B,)
+        """
+        with torch.no_grad():
+            logit = self.score(user_idx, item_idx)
+            pred = torch.sigmoid(logit)
+        return pred
+
+    def score(
+        self,
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
+        pred_vector = self.ncf(user_idx, item_idx)
+        logit = self.logit_layer(pred_vector).squeeze(-1)
+        return logit
+
+    def ncf(
+        self, 
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
+        """
+        user_idx: (B,)
+        item_idx: (B,)
+        """
         user_slice = self.user_embed(user_idx)
         item_slice = self.item_embed(item_idx)
 
@@ -72,6 +106,12 @@ class Module(nn.Module):
         self.mlp_layers = nn.Sequential(
             *list(self._generate_layers(self.hidden))
         )
+
+        kwargs = dict(
+            in_features=self.n_factors//2 + self.hidden[-1],
+            out_features=1,
+        )
+        self.logit_layer = nn.Linear(**kwargs)
 
     def _generate_layers(self, hidden):
         idx = 1

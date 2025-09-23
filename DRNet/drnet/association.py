@@ -34,6 +34,7 @@ class Module(nn.Module):
         # generate layers
         self._init_layers()
 
+
     def forward(
         self, 
         user_idx: torch.Tensor, 
@@ -43,6 +44,36 @@ class Module(nn.Module):
         user_idx: (B,)
         item_idx: (B,)
         """
+        return self.score(user_idx, item_idx)
+
+    def predict(
+        self, 
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
+        """
+        user_idx: (B,)
+        item_idx: (B,)
+        """
+        with torch.no_grad():
+            logit = self.score(user_idx, item_idx)
+            pred = torch.sigmoid(logit)
+        return pred
+
+    def score(
+        self,
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
+        pred_vector = self.gmf(user_idx, item_idx)
+        logit = self.logit_layer(pred_vector).squeeze(-1)
+        return logit
+
+    def gmf(
+        self, 
+        user_idx: torch.Tensor, 
+        item_idx: torch.Tensor,
+    ):
         global_item_vector = self.global_item_vector(user_idx, item_idx)
         item_slice = self.embed_target(item_idx)
         pred_vector = global_item_vector * item_slice
@@ -79,10 +110,15 @@ class Module(nn.Module):
 
     def refer_k_calculator(self, user_idx, refer_idx):
         B, H = refer_idx.size()
-        user_idx_exp = user_idx.unsqueeze(1).expand_as(refer_idx)         # (B,H)
-        user_idx_flat = user_idx_exp.reshape(-1)                          # (B*H,)
-        refer_idx_flat = refer_idx.reshape(-1)                            # (B*H,)
-        refer_k_flat = self.affection(user_idx_flat, refer_idx_flat)      # (B*H, D)
+        # (B,) -> (B,H)
+        user_idx_exp = user_idx.unsqueeze(1).expand_as(refer_idx)
+        # (B,H) -> (B*H,)
+        user_idx_flat = user_idx_exp.reshape(-1)
+        # (B,H) -> (B*H,)
+        refer_idx_flat = refer_idx.reshape(-1)
+        # (B*H,D)
+        refer_k_flat = self.affection.ncf(user_idx_flat, refer_idx_flat)
+        # (B*H,D) -> (B,H,D)
         refer_k = refer_k_flat.view(B, H, -1)
         return refer_k
 
@@ -136,6 +172,12 @@ class Module(nn.Module):
         self.affection = affection.Module(**kwargs)
 
         self.attn = AttentionMechanism()
+
+        kwargs = dict(
+            in_features=self.n_factors,
+            out_features=1,
+        )
+        self.logit_layer = nn.Linear(**kwargs)
 
     def _assert_arg_error(self):
         CONDITION = (self.hidden[-1] == self.n_factors//2)

@@ -59,8 +59,8 @@ class Module(nn.Module):
         return pred
 
     def score(self, user_idx, item_idx):
-        pred_vector_affection = self.affection(user_idx, item_idx)
-        pred_vector_association = self.association(user_idx, item_idx)
+        pred_vector_affection = self.affection.ncf(user_idx, item_idx)
+        pred_vector_association = self.association.gmf(user_idx, item_idx)
 
         kwargs = dict(
             tensors=(pred_vector_affection, pred_vector_association), 
