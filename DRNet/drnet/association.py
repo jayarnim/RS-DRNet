@@ -82,14 +82,14 @@ class Module(nn.Module):
     def global_item_vector(self, user_idx, item_idx):
         kwargs = dict(
             target_idx=user_idx, 
-            target_hist=self.user_hist, 
+            target_hist_idx=self.user_hist, 
             counterpart_padding_value=self.n_items,
         )
-        refer_idx = self._hist_slicer(**kwargs)
+        refer_idx = self._hist_idx_slicer(**kwargs)
 
         kwargs = dict(
             counterpart_idx=item_idx, 
-            target_hist_slice=refer_idx,
+            target_hist_idx_slice=refer_idx,
             counterpart_padding_value=self.n_items,
         )
         mask = self._mask_generator(**kwargs)
@@ -122,24 +122,24 @@ class Module(nn.Module):
         refer_k = refer_k_flat.view(B, H, -1)
         return refer_k
 
-    def _mask_generator(self, counterpart_idx, target_hist_slice, counterpart_padding_value):
+    def _mask_generator(self, counterpart_idx, target_hist_idx_slice, counterpart_padding_value):
         # mask to current target item from history
-        mask_counterpart = target_hist_slice == counterpart_idx.unsqueeze(1)
+        mask_counterpart = target_hist_idx_slice == counterpart_idx.unsqueeze(1)
         # mask to padding
-        mask_padded = target_hist_slice == counterpart_padding_value
+        mask_padded = target_hist_idx_slice == counterpart_padding_value
         # final mask
         mask = mask_counterpart | mask_padded
         return mask
 
-    def _hist_slicer(self, target_idx, target_hist, counterpart_padding_value):
+    def _hist_idx_slicer(self, target_idx, target_hist_idx, counterpart_padding_value):
         # target hist slice
-        target_hist_slice = target_hist[target_idx]
+        target_hist_idx_lice = target_hist_idx[target_idx]
         # calculate max hist in batch
-        lengths = (target_hist_slice != counterpart_padding_value).sum(dim=1)
+        lengths = (target_hist_idx_lice != counterpart_padding_value).sum(dim=1)
         max_len = lengths.max().item()
         # drop padding values
-        target_hist_slice_trunc = target_hist_slice[:, :max_len]
-        return target_hist_slice_trunc
+        target_hist_idx_slice_trunc = target_hist_idx_lice[:, :max_len]
+        return target_hist_idx_slice_trunc
 
     def _init_layers(self):
         self.embed_global = nn.Parameter(torch.randn(self.n_factors))
