@@ -74,12 +74,12 @@ class Module(nn.Module):
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
-        global_item_vector = self.global_item_vector(user_idx, item_idx)
-        item_slice = self.embed_target(item_idx)
-        pred_vector = global_item_vector * item_slice
+        user_hist_embed = self.user_hist_embed(user_idx, item_idx)
+        item_id_embed = self.embed_target(item_idx)
+        pred_vector = user_hist_embed * item_id_embed
         return pred_vector
 
-    def global_item_vector(self, user_idx, item_idx):
+    def user_hist_embed(self, user_idx, item_idx):
         kwargs = dict(
             target_idx=user_idx, 
             target_hist_idx=self.user_hist, 
@@ -94,7 +94,7 @@ class Module(nn.Module):
         )
         mask = self._mask_generator(**kwargs)
 
-        query = self.embed_global.unsqueeze(0)
+        query = self.embed_global
         refer_k = self.refer_k_calculator(user_idx, refer_idx)
         refer_v = self.embed_hist(refer_idx)
         
@@ -142,7 +142,11 @@ class Module(nn.Module):
         return target_hist_idx_slice_trunc
 
     def _init_layers(self):
-        self.embed_global = nn.Parameter(torch.randn(self.n_factors))
+        kwargs = dict(
+            num_embeddings=1, 
+            embedding_dim=self.n_factors,
+        )
+        self.embed_global = nn.Embedding(**kwargs)
 
         kwargs = dict(
             num_embeddings=self.n_items+1, 
