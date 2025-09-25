@@ -74,12 +74,12 @@ class Module(nn.Module):
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
-        user_hist_embed = self.user_hist_embed(user_idx, item_idx)
+        user_hist_embed = self.user_hist_embed_generator(user_idx, item_idx)
         item_id_embed = self.embed_target(item_idx)
         pred_vector = user_hist_embed * item_id_embed
         return pred_vector
 
-    def user_hist_embed(self, user_idx, item_idx):
+    def user_hist_embed_generator(self, user_idx, item_idx):
         kwargs = dict(
             target_idx=user_idx, 
             target_hist_idx=self.user_hist, 
