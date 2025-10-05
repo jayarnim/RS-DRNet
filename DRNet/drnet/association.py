@@ -94,7 +94,7 @@ class Module(nn.Module):
         )
         mask = self._mask_generator(**kwargs)
 
-        query = self.embed_global
+        query = self.embed_global.weight
         refer_k = self.refer_k_calculator(user_idx, refer_idx)
         refer_v = self.embed_hist(refer_idx)
         
@@ -162,7 +162,7 @@ class Module(nn.Module):
         )
         self.embed_hist = nn.Embedding(**kwargs)
 
-        nn.init.normal_(self.embed_global, mean=0.0, std=0.01)
+        nn.init.normal_(self.embed_global.weight, mean=0.0, std=0.01)
         nn.init.normal_(self.embed_target.weight, mean=0.0, std=0.01)
         nn.init.normal_(self.embed_hist.weight, mean=0.0, std=0.01)
 
