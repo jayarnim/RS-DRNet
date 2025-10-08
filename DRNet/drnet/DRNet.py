@@ -14,6 +14,7 @@ class Module(nn.Module):
         user_hist: torch.Tensor, 
     ):
         super(Module, self).__init__()
+
         # attr dictionary for load
         self.init_args = locals().copy()
         del self.init_args["self"]
@@ -31,7 +32,7 @@ class Module(nn.Module):
         )
 
         # generate layers
-        self._init_layers()
+        self._set_up_components()
 
     def forward(
         self, 
@@ -59,19 +60,27 @@ class Module(nn.Module):
         return pred
 
     def score(self, user_idx, item_idx):
+        # modules
         pred_vector_affection = self.affection.ncf(user_idx, item_idx)
         pred_vector_association = self.association.gmf(user_idx, item_idx)
 
+        # agg
         kwargs = dict(
             tensors=(pred_vector_affection, pred_vector_association), 
             dim=-1,
         )
         pred_vector = torch.cat(**kwargs)
+
+        # predict
         logit = self.logit_layer(pred_vector).squeeze(-1)
 
         return logit
 
-    def _init_layers(self):
+    def _set_up_components(self):
+        self._create_modules()
+        self._create_layers()
+
+    def _create_modules(self):
         kwargs = dict(
             n_users=self.n_users,
             n_items=self.n_items,
@@ -91,6 +100,7 @@ class Module(nn.Module):
         )
         self.association = association.Module(**kwargs)
 
+    def _create_layers(self):
         kwargs = dict(
             in_features=self.n_factors//2 + self.hidden[-1],
             out_features=1,

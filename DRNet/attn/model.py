@@ -21,15 +21,10 @@ class AttentionMechanism(nn.Module):
         scores = (Q_exp * K).sum(dim=-1)
 
         # Masking: (B,H) or (H,) -> (B,H)
-        kwargs = dict(
-            input=scores,
-            mask=mask.expand_as(scores),
-            value=float('-inf'),   
-        )
-        masked_scores = torch.masked_fill(**kwargs)
+        scores_masked = scores.masked_fill(~mask.expand_as(scores), float('-inf'))
 
         # Simplex projection: (B,H) -> (B,H)
-        weights = F.softmax(masked_scores, dim=-1)
+        weights = F.softmax(scores_masked, dim=-1)
 
         # stabilize -inf
         valid = torch.isfinite(weights)

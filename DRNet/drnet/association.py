@@ -15,6 +15,7 @@ class Module(nn.Module):
         user_hist: torch.Tensor,
     ):
         super(Module, self).__init__()
+
         # attr dictionary for load
         self.init_args = locals().copy()
         del self.init_args["self"]
@@ -32,8 +33,7 @@ class Module(nn.Module):
         )
 
         # generate layers
-        self._init_layers()
-
+        self._set_up_components()
 
     def forward(
         self, 
@@ -74,41 +74,37 @@ class Module(nn.Module):
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
-        user_hist_embed = self.user_hist_embed_generator(user_idx, item_idx)
-        item_id_embed = self.embed_target(item_idx)
-        pred_vector = user_hist_embed * item_id_embed
+        user_embed_slice_hist = self.user_hist_embed_generator(user_idx, item_idx)
+        item_embed_slice_id = self.embed_target(item_idx)
+        pred_vector = user_embed_slice_hist * item_embed_slice_id
         return pred_vector
 
     def user_hist_embed_generator(self, user_idx, item_idx):
         kwargs = dict(
+            target_hist=self.user_hist, 
             target_idx=user_idx, 
-            target_hist_idx=self.user_hist, 
-            counterpart_padding_value=self.n_items,
+            counterpart_padding_idx=self.n_items,
         )
         refer_idx = self._hist_idx_slicer(**kwargs)
 
         kwargs = dict(
+            hist_idx_slice=refer_idx,
             counterpart_idx=item_idx, 
-            target_hist_idx_slice=refer_idx,
-            counterpart_padding_value=self.n_items,
+            counterpart_padding_idx=self.n_items,
         )
         mask = self._mask_generator(**kwargs)
-
-        query = self.embed_global.weight
-        refer_k = self.refer_k_calculator(user_idx, refer_idx)
-        refer_v = self.embed_hist(refer_idx)
         
         kwargs = dict(
-            Q=query,
-            K=refer_k,
-            V=refer_v,
+            Q=self.user_embed_global,
+            K=self.refer_k_generator(user_idx, refer_idx),
+            V=self.item_embed_hist(refer_idx),
             mask=mask,
         )
         context = self.attn(**kwargs)
 
         return context
 
-    def refer_k_calculator(self, user_idx, refer_idx):
+    def refer_k_generator(self, user_idx, refer_idx):
         B, H = refer_idx.size()
         # (B,) -> (B,H)
         user_idx_exp = user_idx.unsqueeze(1).expand_as(refer_idx)
@@ -122,50 +118,31 @@ class Module(nn.Module):
         refer_k = refer_k_flat.view(B, H, -1)
         return refer_k
 
-    def _mask_generator(self, counterpart_idx, target_hist_idx_slice, counterpart_padding_value):
+    def _mask_generator(self, hist_idx_slice, counterpart_idx, counterpart_padding_idx):
         # mask to current target item from history
-        mask_counterpart = target_hist_idx_slice == counterpart_idx.unsqueeze(1)
+        marking_counterpart_idx = hist_idx_slice == counterpart_idx.unsqueeze(1)
         # mask to padding
-        mask_padded = target_hist_idx_slice == counterpart_padding_value
+        marking_padding_idx = hist_idx_slice == counterpart_padding_idx
         # final mask
-        mask = mask_counterpart | mask_padded
+        mask = ~(marking_counterpart_idx | marking_padding_idx)
         return mask
 
-    def _hist_idx_slicer(self, target_idx, target_hist_idx, counterpart_padding_value):
+    def _hist_idx_slicer(self, target_hist, target_idx, counterpart_padding_idx):
         # target hist slice
-        target_hist_idx_lice = target_hist_idx[target_idx]
+        hist_idx_slice = target_hist[target_idx]
         # calculate max hist in batch
-        lengths = (target_hist_idx_lice != counterpart_padding_value).sum(dim=1)
+        lengths = (hist_idx_slice != counterpart_padding_idx).sum(dim=1)
         max_len = lengths.max().item()
         # drop padding values
-        target_hist_idx_slice_trunc = target_hist_idx_lice[:, :max_len]
-        return target_hist_idx_slice_trunc
+        hist_idx_slice_trunc = hist_idx_slice[:, :max_len]
+        return hist_idx_slice_trunc
 
-    def _init_layers(self):
-        kwargs = dict(
-            num_embeddings=1, 
-            embedding_dim=self.n_factors,
-        )
-        self.embed_global = nn.Embedding(**kwargs)
+    def _set_up_components(self):
+        self._create_modules()
+        self._create_embeddings()
+        self._create_layers()
 
-        kwargs = dict(
-            num_embeddings=self.n_items+1, 
-            embedding_dim=self.n_factors,
-            padding_idx=self.n_items,
-        )
-        self.embed_target = nn.Embedding(**kwargs)
-
-        kwargs = dict(
-            num_embeddings=self.n_items+1, 
-            embedding_dim=self.n_factors,
-            padding_idx=self.n_items,
-        )
-        self.embed_hist = nn.Embedding(**kwargs)
-
-        nn.init.normal_(self.embed_global.weight, mean=0.0, std=0.01)
-        nn.init.normal_(self.embed_target.weight, mean=0.0, std=0.01)
-        nn.init.normal_(self.embed_hist.weight, mean=0.0, std=0.01)
-
+    def _create_modules(self):
         kwargs = dict(
             n_users=self.n_users,
             n_items=self.n_items,
@@ -175,6 +152,18 @@ class Module(nn.Module):
         )
         self.affection = affection.Module(**kwargs)
 
+    def _create_embeddings(self):
+        self.user_embed_global = nn.Parameter(torch.randn(self.n_factors))
+
+        kwargs = dict(
+            num_embeddings=self.n_items+1, 
+            embedding_dim=self.n_factors,
+            padding_idx=self.n_items,
+        )
+        self.item_embed_target = nn.Embedding(**kwargs)
+        self.item_embed_hist = nn.Embedding(**kwargs)
+
+    def _create_layers(self):
         self.attn = AttentionMechanism()
 
         kwargs = dict(
