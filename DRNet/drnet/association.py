@@ -75,7 +75,7 @@ class Module(nn.Module):
         item_idx: torch.Tensor,
     ):
         user_embed_slice_hist = self.user_hist_embed_generator(user_idx, item_idx)
-        item_embed_slice_id = self.embed_target(item_idx)
+        item_embed_slice_id = self.item_embed_target(item_idx)
         pred_vector = user_embed_slice_hist * item_embed_slice_id
         return pred_vector
 
@@ -95,7 +95,7 @@ class Module(nn.Module):
         mask = self._mask_generator(**kwargs)
         
         kwargs = dict(
-            Q=self.user_embed_global,
+            Q=self.user_embed_global.unsqueeze(0),
             K=self.refer_k_generator(user_idx, refer_idx),
             V=self.item_embed_hist(refer_idx),
             mask=mask,
