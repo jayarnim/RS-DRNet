@@ -14,7 +14,32 @@ class Module(nn.Module):
         dropout: float,
         user_hist: torch.Tensor,
     ):
-        super(Module, self).__init__()
+        """
+        Dual relations network for collaborative filtering (Ji et al., 2020)
+        -----
+        Implements the base structure of association,
+        MLP & id embedding based collaborative filtering model,
+        applying attention mechanism to aggregate histories,
+        submodule of Dual Relations Network (DRNet)
+        to learn item-item interactions.
+
+        Args:
+            n_users (int):
+                total number of users in the dataset, U.
+            n_items (int):
+                total number of items in the dataset, I.
+            n_factors (int):
+                dimensionality of user and item latent representation vectors, K.
+            hidden (int):
+                layer dimensions for the MLP-based matching function.
+                (e.g., [64, 32, 16, 8])
+            dropout (float):
+                dropout rate applied to MLP layers for regularization.
+            user_hist (torch.Tensor): 
+                historical item interactions for each user, represented as item indices.
+                (shape: [U, history_length])
+        """
+        super().__init__()
 
         # attr dictionary for load
         self.init_args = locals().copy()
@@ -41,42 +66,57 @@ class Module(nn.Module):
         item_idx: torch.Tensor,
     ):
         """
-        user_idx: (B,)
-        item_idx: (B,)
+        Training Method
+
+        Args:
+            user_idx (torch.Tensor): target user idx (shape: [B,])
+            item_idx (torch.Tensor): target item idx (shape: [B,])
+        
+        Returns:
+            logit (torch.Tensor): (u,i) pair interaction logit (shape: [B,])
         """
         return self.score(user_idx, item_idx)
 
+    @torch.no_grad()
     def predict(
         self, 
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
         """
-        user_idx: (B,)
-        item_idx: (B,)
+        Evaluation Method
+
+        Args:
+            user_idx (torch.Tensor): target user idx (shape: [B,])
+            item_idx (torch.Tensor): target item idx (shape: [B,])
+
+        Returns:
+            prob (torch.Tensor): (u,i) pair interaction probability (shape: [B,])
         """
-        with torch.no_grad():
-            logit = self.score(user_idx, item_idx)
-            pred = torch.sigmoid(logit)
-        return pred
+        logit = self.score(user_idx, item_idx)
+        prob = torch.sigmoid(logit)
+        return prob
 
     def score(
         self,
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
-        pred_vector = self.gmf(user_idx, item_idx)
-        logit = self.logit_layer(pred_vector).squeeze(-1)
+        pred_vector = self.ncf(user_idx, item_idx)
+        logit = self.pred_layer(pred_vector).squeeze(-1)
         return logit
 
-    def gmf(
-        self, 
-        user_idx: torch.Tensor, 
-        item_idx: torch.Tensor,
-    ):
+    def ncf(self, user_idx, item_idx):
         user_embed_slice_hist = self.user_hist_embed_generator(user_idx, item_idx)
         item_embed_slice_id = self.item_embed_target(item_idx)
-        pred_vector = user_embed_slice_hist * item_embed_slice_id
+
+        kwargs = dict(
+            tensors=(user_embed_slice_hist, item_embed_slice_id), 
+            dim=-1,
+        )
+        concat = torch.cat(**kwargs)
+        pred_vector = self.matching_fn(concat)
+
         return pred_vector
 
     def user_hist_embed_generator(self, user_idx, item_idx):
@@ -140,6 +180,7 @@ class Module(nn.Module):
     def _set_up_components(self):
         self._create_modules()
         self._create_embeddings()
+        self._init_embeddings()
         self._create_layers()
 
     def _create_modules(self):
@@ -147,7 +188,7 @@ class Module(nn.Module):
             n_users=self.n_users,
             n_items=self.n_items,
             n_factors=self.n_factors*2,
-            hidden=self.hidden,
+            hidden=[unit * 2 for unit in self.hidden],
             dropout=self.dropout,
         )
         self.affection = affection.Module(**kwargs)
@@ -163,14 +204,31 @@ class Module(nn.Module):
         self.item_embed_target = nn.Embedding(**kwargs)
         self.item_embed_hist = nn.Embedding(**kwargs)
 
+    def _init_embeddings(self):
+        nn.init.normal_(self.user_embed_global, mean=0.0, std=0.01)
+        nn.init.normal_(self.item_embed_target.weight, mean=0.0, std=0.01)
+        nn.init.normal_(self.item_embed_hist.weight, mean=0.0, std=0.01)
+
     def _create_layers(self):
         self.attn = AttentionMechanism()
 
+        components = list(self._yield_layers(self.hidden))
+        self.matching_fn = nn.Sequential(*components)
+
         kwargs = dict(
-            in_features=self.n_factors,
+            in_features=self.hidden[-1],
             out_features=1,
         )
-        self.logit_layer = nn.Linear(**kwargs)
+        self.pred_layer = nn.Linear(**kwargs)
+
+    def _yield_layers(self, hidden):
+        idx = 1
+        while idx < len(hidden):
+            yield nn.Linear(hidden[idx-1], hidden[idx])
+            yield nn.LayerNorm(hidden[idx])
+            yield nn.ReLU()
+            yield nn.Dropout(self.dropout)
+            idx += 1
 
     def _assert_arg_error(self):
         CONDITION = (self.hidden[-1] == self.n_factors//2)

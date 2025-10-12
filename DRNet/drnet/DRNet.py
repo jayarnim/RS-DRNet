@@ -13,7 +13,32 @@ class Module(nn.Module):
         dropout: float,
         user_hist: torch.Tensor, 
     ):
-        super(Module, self).__init__()
+        """
+        Dual relations network for collaborative filtering (Ji et al., 2020)
+        -----
+        Implements the base structure of Dual Relations Network (DRNet),
+        MLP & id embedding based latent factor model,
+        applying attention mechanism to aggregate histories,
+        combining an affection and an association
+        to learn user-item and item-item interactions.
+
+        Args:
+            n_users (int):
+                total number of users in the dataset, U.
+            n_items (int):
+                total number of items in the dataset, I.
+            n_factors (int):
+                dimensionality of user and item latent representation vectors, K.
+            hidden (int):
+                layer dimensions for the MLP-based matching function.
+                (e.g., [64, 32, 16, 8])
+            dropout (float):
+                dropout rate applied to MLP layers for regularization.
+            user_hist (torch.Tensor): 
+                historical item interactions for each user, represented as item indices.
+                (shape: [U, history_length])
+        """
+        super().__init__()
 
         # attr dictionary for load
         self.init_args = locals().copy()
@@ -40,29 +65,46 @@ class Module(nn.Module):
         item_idx: torch.Tensor,
     ):
         """
-        user_idx: (B,)
-        item_idx: (B,)
+        Training Method
+
+        Args:
+            user_idx (torch.Tensor): target user idx (shape: [B,])
+            item_idx (torch.Tensor): target item idx (shape: [B,])
+        
+        Returns:
+            logit (torch.Tensor): (u,i) pair interaction logit (shape: [B,])
         """
         return self.score(user_idx, item_idx)
 
+    @torch.no_grad()
     def predict(
         self, 
         user_idx: torch.Tensor, 
         item_idx: torch.Tensor,
     ):
         """
-        user_idx: (B,)
-        item_idx: (B,)
+        Evaluation Method
+
+        Args:
+            user_idx (torch.Tensor): target user idx (shape: [B,])
+            item_idx (torch.Tensor): target item idx (shape: [B,])
+
+        Returns:
+            prob (torch.Tensor): (u,i) pair interaction probability (shape: [B,])
         """
-        with torch.no_grad():
-            logit = self.score(user_idx, item_idx)
-            pred = torch.sigmoid(logit)
-        return pred
+        logit = self.score(user_idx, item_idx)
+        prob = torch.sigmoid(logit)
+        return prob
 
     def score(self, user_idx, item_idx):
+        pred_vector = self.ensemble(user_idx, item_idx)
+        logit = self.logit_layer(pred_vector).squeeze(-1)
+        return logit
+
+    def ensemble(self, user_idx, item_idx):
         # modules
         pred_vector_affection = self.affection.ncf(user_idx, item_idx)
-        pred_vector_association = self.association.gmf(user_idx, item_idx)
+        pred_vector_association = self.association.ncf(user_idx, item_idx)
 
         # agg
         kwargs = dict(
@@ -71,10 +113,7 @@ class Module(nn.Module):
         )
         pred_vector = torch.cat(**kwargs)
 
-        # predict
-        logit = self.logit_layer(pred_vector).squeeze(-1)
-
-        return logit
+        return pred_vector
 
     def _set_up_components(self):
         self._create_modules()
@@ -93,7 +132,7 @@ class Module(nn.Module):
         kwargs = dict(
             n_users=self.n_users,
             n_items=self.n_items,
-            n_factors=self.n_factors//2,
+            n_factors=self.n_factors,
             hidden=self.hidden,
             dropout=self.dropout,
             user_hist=self.user_hist,
