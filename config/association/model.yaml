@@ -1,0 +1,5 @@
+embedding_dim: 32
+hidden_dim: [64, 32, 16]
+beta: 0.5
+dropout: 0.2
+agg: cat
